@@ -31,25 +31,114 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <main class="app">
-    <header class="bar">
-      <h1 class="bar__title">ひねり並べ</h1>
-      <div class="bar__actions">
+  <canvas id="view" aria-label="立方体の盤"></canvas>
+
+  <!-- 対局中の上のバー -->
+  <header class="top" id="top" hidden>
+    <button class="icon-btn" id="menuBtn" aria-label="メニュー">≡</button>
+    <div class="status"><span class="mark" id="stMark"></span><span id="stText"></span></div>
+    <button class="icon-btn" id="viewBtn" aria-label="視点を戻す">⟲</button>
+  </header>
+
+  <!-- 対局中の下のバー -->
+  <footer class="bottom" id="bottom" hidden>
+    <p class="hint" id="hint"></p>
+    <button class="btn primary" id="actBtn"></button>
+  </footer>
+
+  <!-- タイトル（立方体の上に重ねる） -->
+  <section class="title" id="title">
+    <div class="title__head">
+      <h1>ひねり並べ</h1>
+      <p>置いてひねる立体の目並べ</p>
+    </div>
+    <div class="title__body">
+      <div class="row">
+        <span class="label">大きさ</span>
+        <div class="seg" id="sizeSeg">
+          <button data-v="3">3×3</button><button data-v="4">4×4</button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">CPU 戦で</span>
+        <div class="seg" id="sideSeg">
+          <button data-v="first">先手 <span class="c1">●</span></button><button data-v="second">後手 <span class="c2">■</span></button>
+        </div>
+      </div>
+      <button class="btn primary big" id="cpuBtn">CPU と対戦</button>
+      <button class="btn big" id="pvpBtn">ふたりで対戦</button>
+      <p class="stats" id="stats"></p>
+      <div class="links">
+        <button class="pill" id="helpBtn">遊び方</button>
         <button class="pill" data-wak="install" hidden>アプリにする</button>
         <button class="pill" data-wak="share">共有</button>
       </div>
-    </header>
+      <p class="credit"><a href="/">T.OF...</a> のアプリ</p>
+    </div>
+  </section>
 
-    <section class="stage" id="stage">
-      <!-- ここにゲーム本体 -->
-    </section>
+  <!-- 結果（下からのシート） -->
+  <section class="sheet" id="sheet" hidden>
+    <p class="sheet__result" id="resText"></p>
+    <p class="sheet__sub" id="resSub"></p>
+    <div class="sheet__buttons">
+      <button class="btn primary" id="againBtn">もう一回</button>
+      <button class="btn" id="toTitleBtn">タイトルへ</button>
+      <button class="btn" id="shareBtn">共有</button>
+    </div>
+  </section>
 
-    <footer class="credit">
-      <a href="/">T.OF...</a> のアプリ
-    </footer>
-  </main>
+  <dialog class="dlg" id="menu">
+    <button class="btn" id="restartBtn">最初から</button>
+    <button class="btn" id="quitBtn">タイトルへ</button>
+    <button class="btn" id="menuHelpBtn">遊び方</button>
+    <button class="btn ghost" id="menuClose">閉じる</button>
+  </dialog>
+
+  <dialog class="dlg help" id="help">
+    <h2>遊び方</h2>
+    <ol>
+      <li>自分の番に、空いているマスに印を 1 つ置く。</li>
+      <li>置いたあと、好きな列を 1 回だけ 90° ひねってよい（ひねらなくてもよい）。</li>
+      <li>どれかの面で、縦・横・斜めに N 個（3×3 なら 3 つ、4×4 なら 4 つ）そろえたら勝ち。ひねって相手の列ができてしまったら相手の勝ち。</li>
+    </ol>
+    <div class="figs">
+      <figure>
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <rect width="120" height="120" rx="10" fill="#c7bfae"/>
+          <g fill="#ece6d9">
+            <rect x="6" y="6" width="34" height="34" rx="6"/><rect x="43" y="6" width="34" height="34" rx="6"/><rect x="80" y="6" width="34" height="34" rx="6"/>
+            <rect x="6" y="43" width="34" height="34" rx="6"/><rect x="43" y="43" width="34" height="34" rx="6"/><rect x="80" y="43" width="34" height="34" rx="6"/>
+            <rect x="6" y="80" width="34" height="34" rx="6"/><rect x="43" y="80" width="34" height="34" rx="6"/><rect x="80" y="80" width="34" height="34" rx="6"/>
+          </g>
+          <circle cx="23" cy="23" r="10" fill="#e5533d"/>
+          <rect x="88" y="88" width="18" height="18" rx="4" fill="#2f6fdb"/>
+          <circle cx="60" cy="60" r="10" fill="#e5533d" opacity="0.35"/>
+          <rect x="46" y="46" width="28" height="28" rx="5" fill="none" stroke="#0e1220" stroke-width="3" stroke-dasharray="4 3"/>
+        </svg>
+        <figcaption><b>置く</b>: マスを 1 回タップで仮置き。もう 1 回（または「ここに置く」）で置く。</figcaption>
+      </figure>
+      <figure>
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <rect width="120" height="120" rx="10" fill="#c7bfae"/>
+          <g fill="#ece6d9">
+            <rect x="6" y="6" width="34" height="34" rx="6"/><rect x="43" y="6" width="34" height="34" rx="6"/><rect x="80" y="6" width="34" height="34" rx="6"/>
+            <rect x="6" y="80" width="34" height="34" rx="6"/><rect x="43" y="80" width="34" height="34" rx="6"/><rect x="80" y="80" width="34" height="34" rx="6"/>
+          </g>
+          <g fill="#fffaf0">
+            <rect x="6" y="43" width="34" height="34" rx="6"/><rect x="43" y="43" width="34" height="34" rx="6"/><rect x="80" y="43" width="34" height="34" rx="6"/>
+          </g>
+          <path d="M18 60 H98" stroke="#0e1220" stroke-width="5" stroke-linecap="round"/>
+          <path d="M92 50 L104 60 L92 70" fill="none" stroke="#0e1220" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <figcaption><b>ひねる</b>: 置いたあと、マスをなぞるとその列が回る。回さないなら「回さない」。</figcaption>
+      </figure>
+    </div>
+    <p class="note">何もない所をドラッグ（または 2 本指）で立方体の向きを変えられる。</p>
+    <button class="btn primary" id="helpClose">はじめる</button>
+  </dialog>
 
   <script src="./webapp-kit/webapp-kit.js"></script>
-  <script src="./main.js"></script>
+  <script type="module" src="./main.js"></script>
 </body>
 </html>
