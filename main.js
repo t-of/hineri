@@ -22,11 +22,6 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js');
 }
 
-// 音を使うときは、鳴らす前と音の設定を切り替えたときにこれを呼ぶ（RULES.md §5「音」）。初版は音なし。
-function setAudioSession(soundOn) {
-  try { if (navigator.audioSession) navigator.audioSession.type = soundOn ? 'playback' : 'auto'; } catch { /* 対応していない */ }
-}
-
 // ---- 調整のつまみ ----
 const TWIST_TILES = 2;        // 指がマス何個分動いたら 90° か
 const TAP_PX = 8;             // これ未満の動きはタップ
