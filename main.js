@@ -34,10 +34,99 @@ const COLOR = { bg: '#0e1220', tile: '#ece6d9', groove: '#c7bfae', p1: '#e5533d'
 const MARK = { 1: '●', 2: '■' };
 
 // ---- 保存 ----
-const settings = Object.assign({ v: 1, mode: 'cpu', size: 4, cpuSide: 'first', seenHelp: false }, load('settings', {}));
+const settings = Object.assign({ v: 1, mode: 'cpu', size: 4, cpuSide: 'first', seenHelp: false, sound: true }, load('settings', {}));
 settings.size = 4;   // 3×3 は先手必勝と分かったので 4×4 だけにした。前に 3 を選んでいた人も 4 で始める
 const stats = load('stats', null)?.v === 1 ? load('stats') : { v: 1, cpu: {} };
 for (const n of ['3', '4']) stats.cpu[n] = Object.assign({ win: 0, lose: 0, draw: 0 }, stats.cpu[n]);
+
+// ---- 音（Web Audio で作る。音声ファイルは使わない） ----
+// iPhone のマナーモードでも鳴らす（Safari 16.4 以降）。
+// 'playback' にすると音楽アプリの曲が止まるので、アプリの音がオンのときだけにする。
+function setAudioSession(soundOn) {
+  try { if (navigator.audioSession) navigator.audioSession.type = soundOn ? 'playback' : 'auto'; } catch { /* 対応していない */ }
+}
+const NOTE = (n) => 440 * 2 ** ((n - 69) / 12);
+const sfx = {
+  ctx: null, out: null, noise: null, lastAt: {},
+  // 最初に触ったときに作る（ブラウザは触る前の音を止める）
+  unlock() {
+    if (!settings.sound) return;
+    setAudioSession(true);
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+      this.out = this.ctx.createGain();
+      this.out.gain.value = 0.5;   // 全体を控えめに
+      this.out.connect(this.ctx.destination);
+      const len = this.ctx.sampleRate * 0.4;
+      this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  },
+  // 同じ音が続けて来たら（gap 秒以内）鳴らさない。重ねてうるさくしない
+  ok(name, gap = 0.06) {
+    if (!settings.sound || !this.ctx || this.ctx.state !== 'running') return false;
+    const now = this.ctx.currentTime;
+    if (now - (this.lastAt[name] ?? -1) < gap) return false;
+    this.lastAt[name] = now;
+    return true;
+  },
+  tone(freq, { at = 0, dur = 0.12, type = 'sine', gain = 0.15, slideTo } = {}) {
+    const t = this.ctx.currentTime + at, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.out);
+    o.start(t); o.stop(t + dur + 0.05);
+  },
+  hiss({ at = 0, dur = 0.2, from = 600, to = 2400, gain = 0.12 } = {}) {
+    const t = this.ctx.currentTime + at, src = this.ctx.createBufferSource(), f = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    src.buffer = this.noise;
+    f.type = 'bandpass'; f.Q.value = 1.4;
+    f.frequency.setValueAtTime(from, t);
+    f.frequency.exponentialRampToValueAtTime(to, t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(g).connect(this.out);
+    src.start(t); src.stop(t + dur + 0.05);
+  },
+  // ボタン・切り替え: 小さなクリック
+  tap() { if (this.ok('tap')) this.tone(1300, { dur: 0.035, type: 'triangle', gain: 0.05 }); },
+  // 仮置き: 軽い高めの音
+  tent() { if (this.ok('tent')) this.tone(NOTE(88), { dur: 0.06, type: 'sine', gain: 0.07 }); },
+  // 置く: 木のこまを置く「コトッ」。● は少し高く、■ は少し低く
+  place(who) {
+    if (!this.ok('place')) return;
+    const f = who === 1 ? 520 : 400;
+    this.tone(f, { dur: 0.09, type: 'triangle', gain: 0.2, slideTo: f * 0.6 });
+    this.tone(f * 2.7, { dur: 0.03, type: 'sine', gain: 0.04 });
+  },
+  // ひねる: 「シュッ」と回って「カチッ」と止まる（dur 秒で止まる）
+  twist(dur) {
+    if (!this.ok('twist', 0.15)) return;
+    this.hiss({ dur: Math.max(0.1, dur * 0.9) });
+    this.tone(1800, { at: dur, dur: 0.03, type: 'square', gain: 0.03 });
+    this.tone(700, { at: dur, dur: 0.05, type: 'triangle', gain: 0.1 });
+  },
+  // ひねるのをやめた（元に戻った）: 低く短く
+  undo() { if (this.ok('undo', 0.15)) this.tone(300, { dur: 0.07, type: 'triangle', gain: 0.07, slideTo: 240 }); },
+  // 勝ち・負け・引き分け
+  end(res) {
+    if (!this.ok('end', 1)) return;
+    const seq = { win: [72, 76, 79, 84], lose: [67, 63, 60], draw: [72, 67] }[res];
+    seq.forEach((n, i) => this.tone(NOTE(n), { at: 0.12 + i * (res === 'win' ? 0.09 : 0.16), dur: res === 'win' ? 0.4 : 0.35, type: res === 'lose' ? 'triangle' : 'sine', gain: 0.11 }));
+    if (res === 'win') this.tone(NOTE(96), { at: 0.5, dur: 0.7, gain: 0.04 });
+  },
+};
+setAudioSession(settings.sound);
+addEventListener('pointerdown', () => sfx.unlock(), { capture: true });
 
 // ---- 状態 ----
 const S = {
@@ -314,6 +403,7 @@ function place(k) {
   S.last = k;
   S.tent = -1;
   S.placed++;
+  sfx.place(S.turn);
   const lines = winLines(S.g, S.board, S.turn);
   if (lines.length) { finish({ winner: S.turn, lines }); return true; }
   S.phase = 'twist';
@@ -350,6 +440,7 @@ async function cpuPlay() {
   if (tok !== S.tok) return;
   if (m.twist) {
     beginLayer(m.twist.axis, m.twist.layer);
+    sfx.twist(TWIST_MS / 1000);
     await turnLayer(0, angleOf(m.twist.s));
     if (tok !== S.tok) return;
     commitTwist(m.twist);
@@ -383,6 +474,8 @@ function finish(r) {
   $('resText').replaceChildren(mark, head);
   $('resSub').textContent = `${S.placed} 手` + (r.winner && r.winner !== mover ? '・ひねって相手の列ができた' : '');
   $('shareBtn').onclick = () => WebAppKit.share({ text: share });
+  // 音: CPU 戦は自分から見て、ふたり対戦は決着したら勝ちの音（引き分けは引き分け）
+  sfx.end(r.winner === 0 ? 'draw' : S.mode === 'cpu' && r.winner !== S.human ? 'lose' : 'win');
   paint();
   ui();
   if (r.lines.length) showLine(r.lines[0]);
@@ -399,6 +492,10 @@ function uiText() {
   $('top').hidden = title;
   $('bottom').hidden = S.screen !== 'play';
   $('sheet').hidden = S.screen !== 'over';
+  for (const b of [$('soundBtn'), $('menuSoundBtn')]) {
+    b.textContent = settings.sound ? '音 オン' : '音 オフ';
+    b.setAttribute('aria-pressed', String(settings.sound));
+  }
 
   if (title) {
     for (const b of $('sideSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === settings.cpuSide));
@@ -430,18 +527,28 @@ function uiText() {
 $('actBtn').onclick = () => {
   if (!humanCan()) return;
   if (S.phase === 'place' && S.tent >= 0) place(S.tent);
-  else if (S.phase === 'twist') endTurn();
+  else if (S.phase === 'twist') { sfx.tap(); endTurn(); }
 };
 $('sideSeg').onclick = (e) => {
   const v = e.target.dataset?.v;
   if (!v) return;
   settings.cpuSide = v;
   save('settings', settings);
+  sfx.tap();
   ui();
 };
-$('cpuBtn').onclick = () => startGame('cpu');
-$('pvpBtn').onclick = () => startGame('pvp');
-$('againBtn').onclick = () => startGame(S.mode);
+const toggleSound = () => {
+  settings.sound = !settings.sound;
+  save('settings', settings);
+  setAudioSession(settings.sound);
+  if (settings.sound) { sfx.unlock(); sfx.tap(); }
+  uiText();
+};
+$('soundBtn').onclick = toggleSound;
+$('menuSoundBtn').onclick = toggleSound;
+$('cpuBtn').onclick = () => { sfx.tap(); startGame('cpu'); };
+$('pvpBtn').onclick = () => { sfx.tap(); startGame('pvp'); };
+$('againBtn').onclick = () => { sfx.tap(); startGame(S.mode); };
 $('toTitleBtn').onclick = toTitle;
 $('viewBtn').onclick = () => { viewAnim = null; root.quaternion.copy(HOME); kick(); };
 $('menuBtn').onclick = () => $('menu').showModal();
@@ -514,6 +621,7 @@ function startTwist(gs, mx, my) {
 function cancelTwist(gs) {
   const tok = S.tok;
   S.phase = 'busy';
+  sfx.undo();
   turnLayer(gs.angle, 0).then(() => {
     if (tok !== S.tok) return;
     endLayer();
@@ -569,6 +677,8 @@ function release(e, cancelled) {
     const t = findTwist(S.g, gs.axis, gs.layer, s);
     const tok = S.tok;
     S.phase = 'busy';
+    // 残りの角度を回す時間はほぼ TWIST_MS（終わりをゆるめる）なので、止まる所で「カチッ」
+    sfx.twist(TWIST_MS / 1000);
     turnLayer(gs.angle, angleOf(s)).then(() => {
       if (tok !== S.tok) return;
       commitTwist(t);
@@ -581,7 +691,7 @@ function release(e, cancelled) {
     const k = gs.hit.k;
     if (S.board[k]) return;
     if (S.tent === k) place(k);
-    else { S.tent = k; paint(); ui(); }
+    else { S.tent = k; sfx.tent(); paint(); ui(); }
   }
 }
 canvas.addEventListener('pointerup', (e) => release(e, false));
