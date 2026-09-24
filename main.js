@@ -34,8 +34,8 @@ const COLOR = { bg: '#0e1220', tile: '#ece6d9', groove: '#c7bfae', p1: '#e5533d'
 const MARK = { 1: '●', 2: '■' };
 
 // ---- 保存 ----
-const settings = Object.assign({ v: 1, mode: 'cpu', size: 3, cpuSide: 'first', seenHelp: false }, load('settings', {}));
-if (![3, 4].includes(settings.size)) settings.size = 3;
+const settings = Object.assign({ v: 1, mode: 'cpu', size: 4, cpuSide: 'first', seenHelp: false }, load('settings', {}));
+settings.size = 4;   // 3×3 は先手必勝と分かったので 4×4 だけにした。前に 3 を選んでいた人も 4 で始める
 const stats = load('stats', null)?.v === 1 ? load('stats') : { v: 1, cpu: {} };
 for (const n of ['3', '4']) stats.cpu[n] = Object.assign({ win: 0, lose: 0, draw: 0 }, stats.cpu[n]);
 
@@ -401,12 +401,9 @@ function uiText() {
   $('sheet').hidden = S.screen !== 'over';
 
   if (title) {
-    for (const b of $('sizeSeg').children) b.setAttribute('aria-pressed', String(+b.dataset.v === settings.size));
     for (const b of $('sideSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === settings.cpuSide));
-    const played = ['3', '4'].filter((n) => { const s = stats.cpu[n]; return s.win + s.lose + s.draw; });
-    $('stats').textContent = played.length
-      ? 'CPU 戦 ' + played.map((n) => { const s = stats.cpu[n]; return `${n}×${n} ${s.win}勝 ${s.lose}敗 ${s.draw}分`; }).join('　')
-      : '';
+    const s = stats.cpu['4'];   // 成績は 4×4 のものだけ出す（3×3 の記録は保存に残してある）
+    $('stats').textContent = s.win + s.lose + s.draw ? `CPU 戦 ${s.win}勝 ${s.lose}敗 ${s.draw}分` : '';
     return;
   }
 
@@ -434,13 +431,6 @@ $('actBtn').onclick = () => {
   if (!humanCan()) return;
   if (S.phase === 'place' && S.tent >= 0) place(S.tent);
   else if (S.phase === 'twist') endTurn();
-};
-$('sizeSeg').onclick = (e) => {
-  const v = +e.target.dataset?.v;
-  if (!v) return;
-  settings.size = v;
-  save('settings', settings);
-  toTitle();
 };
 $('sideSeg').onclick = (e) => {
   const v = e.target.dataset?.v;

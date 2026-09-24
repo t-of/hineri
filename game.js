@@ -96,12 +96,57 @@ function evaluate(g, b, me) {
 
 const empties = (b) => { const e = []; for (let k = 0; k < b.length; k++) if (!b[k]) e.push(k); return e; };
 
-// who が次の 1 手（置く＋ひねる）で勝てるか
+// who が次の 1 手（置く＋ひねる）で勝てるか。
+// 置いてからひねるのは、ひねってから行き先に置くのと同じなので、
+// 「ひねった（またはひねらない）盤に、who が N−1 個と空き 1 つの列がある」かを見ればよい
 function canWin(g, b, who) {
-  for (const c of empties(b)) {
-    const b1 = b.slice(); b1[c] = who;
-    if (hasLine(g, b1, who)) return true;
-    for (const t of g.twists) if (hasLine(g, twistBoard(g, b1, t), who)) return true;
+  for (const t of [null, ...g.twists]) {
+    const bt = t ? twistBoard(g, b, t) : b;
+    for (const l of g.lines) {
+      let m = 0, e = 0;
+      for (const k of l) { if (bt[k] === who) m++; else if (!bt[k]) e++; }
+      if (m === g.N - 1 && e === 1) return true;
+    }
+  }
+  return false;
+}
+
+// 1 手指した結果（who から見て 'win' / 'lose' / 'draw' / null）
+function play(g, b, who, cell, t) {
+  const b1 = b.slice(); b1[cell] = who;
+  if (hasLine(g, b1, who)) return { b: b1, r: 'win' };
+  const b2 = t ? twistBoard(g, b1, t) : b1;
+  if (hasLine(g, b2, who)) return { b: b2, r: 'win' };
+  if (hasLine(g, b2, 3 - who)) return { b: b2, r: 'lose' };
+  return { b: b2, r: b2.includes(0) ? null : 'draw' };
+}
+function* movesOf(g, b) {
+  for (const c of empties(b)) for (const t of [null, ...g.twists]) yield [c, t];
+}
+
+// 読みの時間の上限。越えたら読むのをやめて、分かっている中でいちばんよい手を指す
+const THINK_MS = 500;
+let deadline = Infinity;
+const late = () => performance.now() > deadline;
+
+// mover の番の盤 b で、mover がどう指しても me が次の 1 手で勝てるか（me の 2 手必勝）
+function forcedWin(g, b, mover, me) {
+  for (const [c, t] of movesOf(g, b)) {
+    if (late()) return false;
+    const y = play(g, b, mover, c, t);
+    if (y.r === 'lose') continue;           // mover が自分から負ける手は数えない
+    if (y.r || !canWin(g, y.b, me)) return false;
+  }
+  return true;
+}
+// who の番の盤 b で、who に 2 手必勝（置いて、こちらのどの手のあとも勝てる形）があるか
+function hasWin2(g, b, who) {
+  for (const [c, t] of movesOf(g, b)) {
+    if (late()) return false;
+    const y = play(g, b, who, c, t);
+    if (y.r === 'win') return true;
+    if (y.r || !canWin(g, y.b, who)) continue;
+    if (forcedWin(g, y.b, 3 - who, who)) return true;
   }
   return false;
 }
@@ -125,8 +170,19 @@ export function cpuMove(g, board, me, rng = Math.random) {
     }
   }
   if (wins.length) return wins[Math.floor(rng() * wins.length)];
-  // 3〜5. 評価値で並べ（同点は乱数で散らす）、上位 12 手から相手が次に勝てない最初の手
+  // 3. 評価値で並べる（同点は乱数で散らす）
   cands.sort((x, y) => y.score - x.score);
-  const pick = cands.slice(0, 12).find((m) => !canWin(g, m.b, opp)) || cands[0];
-  return { cell: pick.cell, twist: pick.twist };
+  // 4. 相手が次の 1 手で勝てない手だけにする
+  const safe = cands.filter((m) => !canWin(g, m.b, opp));
+  const out = (m) => ({ cell: m.cell, twist: m.twist });
+  if (!safe.length) return out(cands[0]);
+  // 5. 自分が 2 手で必ず勝てる手があれば指す（上位 30 手）
+  // 6. 相手に 2 手必勝を許さない手を上位 20 手から。なければ 1 位
+  // ponytail: 上位だけを、THINK_MS まで読む。もっと強くするなら Worker に移して 3 手先まで読む
+  deadline = performance.now() + THINK_MS;
+  try {
+    const win2 = safe.slice(0, 30).find((m) => forcedWin(g, m.b, opp, me));
+    if (win2) return out(win2);
+    return out(safe.slice(0, 20).find((m) => !late() && !hasWin2(g, m.b, opp)) || safe[0]);
+  } finally { deadline = Infinity; }
 }

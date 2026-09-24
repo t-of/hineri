@@ -5,6 +5,35 @@ import { Vector3, Quaternion } from './vendor/three.module.min.js';
 
 const randomBoard = (g, fill = 0.6) => Int8Array.from({ length: g.count }, () => (Math.random() < fill ? 1 + (Math.random() < 0.5) : 0));
 const same = (a, b) => a.every((v, k) => v === b[k]);
+const twistBoardOr = (g, b, m, who) => { const b1 = b.slice(); b1[m.cell] = who; return m.twist ? twistBoard(g, b1, m.twist) : b1; };
+// 確かめ用に素直に書いた「who の 2 手必勝があるか」（who の手 → 相手の全部の手 → who が 1 手で勝てる）
+function oneMoveWin(g, b, who) {
+  for (let c = 0; c < g.count; c++) if (!b[c]) for (const t of [null, ...g.twists]) {
+    const b1 = b.slice(); b1[c] = who;
+    if (winLines(g, b1, who).length || winLines(g, t ? twistBoard(g, b1, t) : b1, who).length) return true;
+  }
+  return false;
+}
+function hasWin2Test(g, b, who) {
+  const opp = 3 - who;
+  for (let c = 0; c < g.count; c++) if (!b[c]) for (const t of [null, ...g.twists]) {
+    const b1 = b.slice(); b1[c] = who;
+    if (winLines(g, b1, who).length) return true;
+    const b2 = t ? twistBoard(g, b1, t) : b1, r = judge(g, b2, who);
+    if (r) { if (r.winner === who) return true; continue; }
+    if (!oneMoveWin(g, b2, who)) continue;
+    let all = true;
+    for (let c2 = 0; c2 < g.count && all; c2++) if (!b2[c2]) for (const t2 of [null, ...g.twists]) {
+      const y1 = b2.slice(); y1[c2] = opp;
+      if (winLines(g, y1, opp).length) { all = false; break; }
+      const y2 = t2 ? twistBoard(g, y1, t2) : y1, r2 = judge(g, y2, opp);
+      if (r2) { if (r2.winner === opp || r2.winner === 0) { all = false; break; } continue; }
+      if (!oneMoveWin(g, y2, who)) { all = false; break; }
+    }
+    if (all) return true;
+  }
+  return false;
+}
 
 for (const N of [3, 4]) {
   const g = geometry(N);
@@ -77,6 +106,13 @@ for (const N of [3, 4]) {
     const after = m.twist ? twistBoard(g, b1, m.twist) : b1;
     const r2 = judge(g, after, 1);
     assert.ok(!r2 || r2.winner !== 2, 'CPU が負ける手を指した');
+  }
+  // CPU: 相手に次の手で「2 手必勝」を残す手を避ける。
+  // 下の盤は、前の CPU（相手の 1 手先だけ読む）が後手で指すと、先手に 2 手必勝を残していた局面
+  if (N === 4) {
+    const b = Int8Array.from('100010000000100000000000000000000000000000000000000000000000000000000000002000200000000000000000', Number);
+    const m = cpuMove(g, b, 2);
+    assert.ok(!hasWin2Test(g, twistBoardOr(g, b, m, 2), 1), 'CPU が相手の 2 手必勝を残した');
   }
   console.log(`N=${N}: ok（CPU いちばん遅い 1 手 ${worst.toFixed(0)}ms）`);
 }
