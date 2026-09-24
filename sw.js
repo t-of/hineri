@@ -7,8 +7,9 @@
 // 古いキャッシュを消すときは、必ず自分の PREFIX で始まるものだけを消す。
 // keys.filter(k => k !== CACHE) のように書くと、ほかのアプリのキャッシュまで消してしまう。
 
-const PREFIX = 'hineri-';
-const VERSION = 'v2';
+const PREFIX = 'skewline-';
+const OLD_PREFIX = 'hineri-'; // 旧名（ひねり並べ）。古いキャッシュを消すためだけに残す。
+const VERSION = 'v3';
 const CACHE = `${PREFIX}${VERSION}`;
 const FONT_CACHE = `${PREFIX}fonts`;
 
@@ -37,7 +38,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
     .then((keys) => Promise.all(keys
-      .filter((k) => k.startsWith(PREFIX) && k !== CACHE && k !== FONT_CACHE)
+      .filter((k) => (k.startsWith(PREFIX) && k !== CACHE && k !== FONT_CACHE) || k.startsWith(OLD_PREFIX))
       .map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });

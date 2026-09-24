@@ -1,22 +1,26 @@
-// ひねり並べ。描画と操作。ルールと CPU は game.js（node test.mjs で確かめる）。
+// SKEWLINE（旧名 ひねり並べ）。描画と操作。ルールと CPU は game.js（node test.mjs で確かめる）。
 import * as THREE from './vendor/three.module.min.js';
 import { geometry, twistBoard, findTwist, winLines, judge, cpuMove } from './game.js';
 
 // localStorage はほかのアプリと共有される（同じ t-of.github.io のため）。
-// キーは必ず 'hineri.' で始める。
-const STORE = 'hineri.';
+// キーは必ず 'skewline.' で始める。
+const STORE = 'skewline.';
+const OLD_STORE = 'hineri.'; // 旧名。読めれば引き継ぐ（古いキーは消さない）。
 
 function load(key, fallback) {
   try {
     const v = localStorage.getItem(STORE + key);
-    return v == null ? fallback : JSON.parse(v);
+    if (v != null) return JSON.parse(v);
+    const old = localStorage.getItem(OLD_STORE + key);
+    if (old != null) { const parsed = JSON.parse(old); save(key, parsed); return parsed; }
+    return fallback;
   } catch { return fallback; }
 }
 function save(key, value) {
   try { localStorage.setItem(STORE + key, JSON.stringify(value)); } catch { /* 保存できなくても遊べる */ }
 }
 
-WebAppKit.init({ title: 'ひねり並べ', text: '立方体の面に印を置き、置いたあとに列を 1 回だけひねれる目並べ。ひねれば相手の列を崩すことも、自分の列を作ることもできる。CPU 対戦・ふたり対戦。' });
+WebAppKit.init({ title: 'SKEWLINE', text: '立方体の面に印を置き、置いたあとに列を 1 回だけひねれる目並べ。ひねれば相手の列を崩すことも、自分の列を作ることもできる。CPU 対戦・ふたり対戦。' });
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js');
@@ -461,12 +465,12 @@ function finish(r) {
     stats.cpu[S.N][res]++;
     save('stats', stats);
     head = { win: 'あなたの勝ち', lose: 'あなたの負け', draw: '引き分け' }[res];
-    share = res === 'win' ? `ひねり並べ（${size}）で CPU に ${S.placed} 手で勝った！`
-      : `ひねり並べ（${size}）で CPU と対戦。${res === 'draw' ? '引き分けだった' : '負けた'}`;
+    share = res === 'win' ? `SKEWLINE（${size}）で CPU に ${S.placed} 手で勝った！`
+      : `SKEWLINE（${size}）で CPU と対戦。${res === 'draw' ? '引き分けだった' : '負けた'}`;
   } else {
     head = r.winner === 0 ? '引き分け' : `${r.winner === 1 ? '先手' : '後手'}の勝ち`;
-    share = r.winner === 0 ? `ひねり並べ（${size}）でふたり対戦。引き分けだった`
-      : `ひねり並べ（${size}）で ${MARK[r.winner]} が ${S.placed} 手で勝った！`;
+    share = r.winner === 0 ? `SKEWLINE（${size}）でふたり対戦。引き分けだった`
+      : `SKEWLINE（${size}）で ${MARK[r.winner]} が ${S.placed} 手で勝った！`;
   }
   const mark = document.createElement('span');
   mark.className = `c${r.winner}`;

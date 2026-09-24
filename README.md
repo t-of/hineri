@@ -1,10 +1,12 @@
-# ひねり並べ — 置いてひねる立体の目並べ
+# SKEWLINE — 置いてひねる立体の目並べ
 
 立方体の面に印を置き、置いたあとに列を 1 回だけひねれる目並べ。ひねれば相手の列を崩すことも、自分の列を作ることもできる。CPU 対戦・ふたり対戦。
 
+旧名「ひねり並べ」（id: `hineri`）。
+
 ## 🔗 リンク
 
-- 遊ぶ: https://t-of.github.io/hineri/
+- 遊ぶ: https://t-of.github.io/skewline/
 - 制作: [T.OF...](https://t-of.github.io/)
 
 ## 遊び方
@@ -46,4 +48,4 @@ node test.mjs
 
 - 3D は [Three.js](https://threejs.org/)（MIT）を使用。`vendor/three.module.min.js`（r170、1 ファイルの ES module）を同梱し、ライセンスは `vendor/three.LICENSE`。
 - r171 以降はビルドが 2 ファイル（three.core + three.module）に分かれたため、1 ファイルで済む r170 を使っている。
-- 保存: `hineri.settings`（大きさは 4 に固定・先手後手・遊び方を見たか）、`hineri.stats`（CPU 戦の成績）
+- 保存: `skewline.settings`（大きさは 4 に固定・先手後手・遊び方を見たか）、`skewline.stats`（CPU 戦の成績）。旧 id（`hineri.settings` など）が残っていれば読み込んで引き継ぐ。
