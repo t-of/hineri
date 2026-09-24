@@ -153,26 +153,44 @@ function paint() {
 }
 
 // ---- 画面の大きさと立方体の位置 ----
-// [立方体の外接球の直径 / 画面幅, 中心の高さ / 画面の高さ]
-const FRAME = { title: [0.6, 0.35], play: [0.92, 0.48], over: [0.76, 0.36] };
+// 立方体は、バーやシートに覆われていない所の真ん中に置く。
+// FILL = 空いた所の短い辺に対する、立方体の外接球の直径
+const FILL = { title: 0.85, play: 0.95, over: 0.9 };
+const COVER = { title: ['.title__head', '.title__body'], play: ['#top', '#bottom'], over: ['#top', '#sheet'] };
+function freeRect() {
+  const w = innerWidth, h = innerHeight, r = { l: 0, t: 0, r: w, b: h };
+  for (const sel of COVER[S.screen]) {
+    // 出てくるときのアニメーション（transform）に左右されないよう、レイアウトの位置で測る
+    const el = document.querySelector(sel);
+    let x = 0, y = 0;
+    for (let e = el; e; e = e.offsetParent) { x += e.offsetLeft; y += e.offsetTop; }
+    const b = { left: x, top: y, bottom: y + el.offsetHeight, width: el.offsetWidth };
+    if (!b.width) continue;
+    if (b.left > w * 0.4) r.r = Math.min(r.r, b.left);        // 横長の画面で右に寄せたもの
+    else if (b.top > h * 0.4) r.b = Math.min(r.b, b.top);
+    else r.t = Math.max(r.t, b.bottom);
+  }
+  return r;
+}
+let lastSize = '';
 function frameView() {
   const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h, false);
+  if (lastSize !== `${w}x${h}`) { lastSize = `${w}x${h}`; renderer.setSize(w, h, false); }
   camera.aspect = w / h;
-  const [size, cy] = FRAME[S.screen];
-  const target = Math.min(size * w, 0.56 * h);
+  const f = freeRect();
+  const target = Math.max(80, FILL[S.screen] * Math.min(f.r - f.l, f.b - f.t));
   const d = (S.N * 0.87 * h) / (Math.tan((FOV * Math.PI) / 360) * target);
   camera.position.set(0, 0, d);
   camera.near = d / 10;
   camera.far = d * 3;
-  camera.setViewOffset(w, h, 0, (0.5 - cy) * h, w, h);
+  camera.setViewOffset(w, h, w / 2 - (f.l + f.r) / 2, h / 2 - (f.t + f.b) / 2, w, h);
   camera.updateProjectionMatrix();
   kick();
 }
 addEventListener('resize', frameView);
 
 // ---- 描くのは動きがあるときだけ ----
-let raf = 0, lastT = 0, anim = null;
+let raf = 0, lastT = 0, anim = null, viewAnim = null;
 const Y = new THREE.Vector3(0, 1, 0), tmpQ = new THREE.Quaternion();
 function kick() { if (!raf) raf = requestAnimationFrame(frame); }
 function frame(now) {
@@ -187,6 +205,12 @@ function frame(now) {
     if (t === 1) { const a = anim; anim = null; a.done(); }
     more = true;
   }
+  if (viewAnim) {
+    const t = Math.min(1, (now - viewAnim.t0) / viewAnim.dur);
+    root.quaternion.slerpQuaternions(viewAnim.from, viewAnim.to, 1 - (1 - t) ** 3);
+    if (t === 1) viewAnim = null;
+    more = true;
+  }
   if (S.screen === 'title' && !REDUCED) {
     root.quaternion.premultiply(tmpQ.setFromAxisAngle(Y, dt * 0.00035));
     more = true;
@@ -199,6 +223,17 @@ function frame(now) {
   renderer.render(scene, camera);
   if (more || pointers.size) raf = requestAnimationFrame(frame);
   else lastT = 0;
+}
+
+// 決着したら、そろった列の面がこちらを向くように視点を回す（少し上から見る）
+const LOOK = new THREE.Vector3(0.25, 0.45, 1).normalize();
+function showLine(line) {
+  const n = new THREE.Vector3(...S.g.nrm[line[0]]).applyQuaternion(root.quaternion);
+  if (n.dot(LOOK) > 0.85) return;
+  const to = new THREE.Quaternion().setFromUnitVectors(n, LOOK).multiply(root.quaternion);
+  if (REDUCED) { root.quaternion.copy(to); kick(); return; }
+  viewAnim = { from: root.quaternion.clone(), to, t0: performance.now(), dur: 600 };
+  kick();
 }
 
 // ---- 層をひねる ----
@@ -246,6 +281,7 @@ const humanCan = () => S.screen === 'play' && S.phase !== 'busy' && !isCpuTurn()
 function startGame(mode) {
   S.tok++;
   endLayer();
+  viewAnim = null;
   S.mode = mode;
   S.N = settings.size;
   S.human = settings.cpuSide === 'first' ? 1 : 2;
@@ -255,7 +291,6 @@ function startGame(mode) {
   S.board = new Int8Array(S.g.count);
   Object.assign(S, { screen: 'play', turn: 1, phase: 'place', tent: -1, last: -1, placed: 0, win: new Set(), winner: 0 });
   root.quaternion.copy(HOME);
-  frameView();
   paint();
   ui();
   if (isCpuTurn()) cpuPlay();
@@ -264,11 +299,11 @@ function startGame(mode) {
 function toTitle() {
   S.tok++;
   endLayer();
+  viewAnim = null;
   S.screen = 'title';
   if (!S.g || S.g.N !== settings.size) { S.N = settings.size; buildCube(S.N); }
   S.board = new Int8Array(S.g.count);
   Object.assign(S, { tent: -1, last: -1, win: new Set() });
-  frameView();
   paint();
   ui();
 }
@@ -348,13 +383,17 @@ function finish(r) {
   $('resText').replaceChildren(mark, head);
   $('resSub').textContent = `${S.placed} 手` + (r.winner && r.winner !== mover ? '・ひねって相手の列ができた' : '');
   $('shareBtn').onclick = () => WebAppKit.share({ text: share });
-  frameView();
   paint();
   ui();
+  if (r.lines.length) showLine(r.lines[0]);
 }
 
 // ---- 画面の文字とボタン ----
 function ui() {
+  uiText();
+  frameView();
+}
+function uiText() {
   const title = S.screen === 'title';
   $('title').hidden = !title;
   $('top').hidden = title;
@@ -414,7 +453,7 @@ $('cpuBtn').onclick = () => startGame('cpu');
 $('pvpBtn').onclick = () => startGame('pvp');
 $('againBtn').onclick = () => startGame(S.mode);
 $('toTitleBtn').onclick = toTitle;
-$('viewBtn').onclick = () => { root.quaternion.copy(HOME); kick(); };
+$('viewBtn').onclick = () => { viewAnim = null; root.quaternion.copy(HOME); kick(); };
 $('menuBtn').onclick = () => $('menu').showModal();
 $('menuClose').onclick = () => $('menu').close();
 $('restartBtn').onclick = () => {
@@ -427,7 +466,8 @@ $('quitBtn').onclick = () => {
   $('menu').close();
   toTitle();
 };
-const openHelp = () => { $('menu').close(); $('help').showModal(); };
+const showHelp = () => { $('help').showModal(); $('help').scrollTop = 0; };
+const openHelp = () => { $('menu').close(); showHelp(); };
 $('helpBtn').onclick = openHelp;
 $('menuHelpBtn').onclick = openHelp;
 $('helpClose').onclick = () => $('help').close();
@@ -454,6 +494,7 @@ function toScreen(v) {
   return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight };
 }
 function rotateView(dx, dy) {
+  viewAnim = null;
   root.quaternion.premultiply(tmpQ.setFromEuler(new THREE.Euler(dy * VIEW_RAD_PER_PX, dx * VIEW_RAD_PER_PX, 0)));
   kick();
 }
@@ -461,17 +502,19 @@ function rotateView(dx, dy) {
 // 触ったマスの面以外の 2 軸 × 正負から、「回したとき触った点が画面で動く向き」が指の動きに一番合う軸を選ぶ
 function startTwist(gs, mx, my) {
   const P = gs.hit.local;
+  const nv = new THREE.Vector3(...S.g.nrm[gs.hit.k]);
   const fa = S.g.nrm[gs.hit.k].findIndex((v) => v);
   root.updateMatrixWorld();
   let best = null;
   for (const a of [0, 1, 2]) {
     if (a === fa) continue;
-    const vel = new THREE.Vector3().setComponent(a, 1).cross(P);   // +1 rad 回したときの点の速さ
-    const s0 = toScreen(P), s1 = toScreen(P.clone().addScaledVector(vel, 0.01));
-    const dx = (s1.x - s0.x) / 0.01, dy = (s1.y - s0.y) / 0.01, len = Math.hypot(dx, dy);
+    // 軸 a で +回したとき、触った点が面の中で動く向き（e_a × n）。面の外向きの成分は入れない
+    const along = new THREE.Vector3().setComponent(a, 1).cross(nv);
+    const s0 = toScreen(P), s1 = toScreen(P.clone().addScaledVector(along, 0.01));
+    const dx = (s1.x - s0.x) / 0.01, dy = (s1.y - s0.y) / 0.01, len = Math.hypot(dx, dy);  // len = 画面でのマス 1 つ分
     if (len < 1e-3) continue;
     const score = Math.abs(dx * mx + dy * my) / len;
-    if (!best || score > best.score) best = { a, score, dir: { x: dx / len, y: dy / len }, tilePx: len / vel.length() };
+    if (!best || score > best.score) best = { a, score, dir: { x: dx / len, y: dy / len }, tilePx: len };
   }
   if (!best) return;
   Object.assign(gs, { kind: 'twist', axis: best.a, layer: S.g.pos[gs.hit.k][best.a], dir: best.dir, tilePx: best.tilePx, angle: 0 });
@@ -557,7 +600,6 @@ canvas.addEventListener('pointercancel', (e) => release(e, true));
 // ---- はじめ ----
 buildCube(S.N);
 S.board = new Int8Array(S.g.count);
-frameView();
 paint();
 ui();
-if (!settings.seenHelp) $('help').showModal();
+if (!settings.seenHelp) showHelp();
